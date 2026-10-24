@@ -1,0 +1,16 @@
+// expect: line 1: # Notes
+// expect: word at 18: about
+// expect: words: Notes, Some, text, about, ropes.
+// Finds lines and words in a document, and walks it a word at a time.
+import { Rope, Direction } from wordtree.Rope;
+
+let r = new Rope("# Notes\nSome text about ropes.\n\nSecond paragraph.");
+let heading = r.spanText(r.linePrefix(0, "#")).trim();
+let word = r.spanText(r.word(18));
+let words = Array.new<Bytes>(0);
+r.moveTo(2);
+while (words.len() < 5) {
+  words.push(r.spanText(r.word(r.cursor())));
+  r.seekWord(Direction.Forward);
+}
+`line 1: ${heading}\nword at 18: ${word}\nwords: ${words.join(", ")}`

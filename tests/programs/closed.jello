@@ -1,0 +1,9 @@
+// trap: TYPE_MISMATCH 9:1
+// A rope is not used after it is closed.
+load { rope_new, rope_close, rope_length } from wordtree;
+typedef Rope = abstract;
+let open: () -> Rope = rope_new;
+let close: (Rope) -> Void = rope_close;
+let length: (Rope) -> I32 = rope_length;
+let r = open(); close(r);
+length(r)

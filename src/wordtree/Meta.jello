@@ -1,0 +1,4 @@
+package wordtree;
+
+// The version of the wordtree package.
+export let version = fn(): Bytes { "0.1.0" };

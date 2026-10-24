@@ -1,0 +1,157 @@
+package wordtree;
+
+/* Ropes: editable UTF-8 text, cheap to change in the middle, on librope.
+ * Positions count characters (code points), not bytes, and are held to the
+ * rope: below 0 is 0, and past the end is the end. A span is a start and an
+ * end, the end not included, as Bytes.substring takes them.
+ *
+ * A rope stays in the process that made it: librope keeps no lock. */
+
+load {
+  rope_new, rope_close, rope_clear, rope_insert, rope_delete, rope_replace, rope_length,
+  rope_byte_length, rope_slice, rope_text, rope_cursor, rope_set_cursor, rope_bound, rope_seek
+} from wordtree;
+
+// A librope rope, with its cursor.
+typedef Handle = abstract;
+
+let _new: () -> Handle = rope_new;
+let _close: (Handle) -> Void = rope_close;
+let _clear: (Handle) -> Void = rope_clear;
+let _insert: (Handle, I32, Bytes) -> Bool = rope_insert;
+let _delete: (Handle, I32, I32) -> Void = rope_delete;
+let _replace: (Handle, I32, I32, Bytes) -> Bool = rope_replace;
+let _length: (Handle) -> I32 = rope_length;
+let _byteLength: (Handle) -> I32 = rope_byte_length;
+let _slice: (Handle, I32, I32) -> Bytes = rope_slice;
+let _text: (Handle) -> Bytes = rope_text;
+let _cursor: (Handle) -> I32 = rope_cursor;
+let _setCursor: (Handle, I32) -> I32 = rope_set_cursor;
+// The span of a kind at a position, as two little-endian I32s; kinds are the _BOUND_ constants.
+let _bound: (Handle, I32, I32, Bytes) -> Bytes = rope_bound;
+// Moves the cursor by a unit of a kind, forward when the third argument is above 0.
+let _seek: (Handle, I32, I32) -> I32 = rope_seek;
+
+const _BOUND_WORD = 0;
+const _BOUND_LINE = 1;
+const _BOUND_PARAGRAPH = 2;
+const _BOUND_UNTIL = 3;
+const _BOUND_LINE_PREFIX = 4;
+
+const _SEEK_WORD = 0;
+const _SEEK_LINE = 1;
+const _SEEK_PARAGRAPH = 2;
+
+// The characters from START up to, not including, END.
+export typedef Span = { let start: I32; let end: I32; };
+
+// Which way a seek moves the cursor.
+export enum Direction { Back; Forward; }
+
+// TEXT, unless it is not UTF-8 or holds a zero byte, which librope cannot keep.
+let _checked = fn(name: Bytes, text: Bytes): Bytes {
+  if (!text.utf8Validate()) { throw `Rope.${name}: the text is not UTF-8`; }
+  if (text.contains("\x00")) { throw `Rope.${name}: the text holds a zero byte`; }
+  text
+};
+
+let _span = fn(raw: Bytes): Span { { start: raw.readI32Le(0), end: raw.readI32Le(4) } };
+
+let _step = fn(direction: Direction): I32 { direction == Direction.Forward ? 1 : -1 };
+
+/* A rope of text, with a cursor: a position that seeks move and edits keep
+ * in step. Closing a rope frees its text at once; a closed rope traps when
+ * used. An unclosed rope is freed when it is collected. */
+export typedef Rope = { let handle: Handle; };
+export prototype Rope {
+  // A rope holding TEXT, empty by default, with its cursor at 0.
+  init(text: Bytes = "") {
+    this.handle = _new();
+    if (text != "") { this.insert(0, text); }
+  };
+
+  // Frees the rope's text now, rather than when it is collected; closing twice does nothing.
+  close(): Null { _close(this.handle); null };
+
+  // The number of characters.
+  length(): I32 { _length(this.handle) };
+
+  // The number of bytes of the text.
+  byteLength(): I32 { _byteLength(this.handle) };
+
+  // The whole text.
+  text(): Bytes { _text(this.handle) };
+
+  // The text from START up to, not including, END; empty when END is not after START.
+  slice(start: I32, end: I32): Bytes { _slice(this.handle, start, end) };
+
+  // The text of a span.
+  spanText(span: Span): Bytes { _slice(this.handle, span.start, span.end) };
+
+  // Inserts TEXT at AT; the cursor stays where it was. Text that is not UTF-8 throws.
+  insert(at: I32, text: Bytes): Rope {
+    _insert(this.handle, at, _checked("insert", text));
+    this
+  };
+
+  // Appends TEXT.
+  append(text: Bytes): Rope { this.insert(_length(this.handle), text) };
+
+  /* Deletes the characters from START up to END, in either order. A cursor
+   * inside them moves to their start, and one after them moves back with
+   * the text. */
+  delete(start: I32, end: I32): Rope { _delete(this.handle, start, end); this };
+
+  /* Replaces the characters from START up to END with TEXT, and puts the
+   * cursor at their start. Text that is not UTF-8 throws, changing nothing. */
+  replace(start: I32, end: I32, text: Bytes): Rope {
+    _replace(this.handle, start, end, _checked("replace", text));
+    this
+  };
+
+  // Deletes all the text and puts the cursor at 0.
+  clear(): Rope { _clear(this.handle); this };
+
+  // The cursor.
+  cursor(): I32 { _cursor(this.handle) };
+
+  // Moves the cursor to AT; where it now is.
+  moveTo(at: I32): I32 { _setCursor(this.handle, at) };
+
+  /* The word at AT, or the next word when AT is on whitespace; an empty span
+   * at AT when only whitespace follows. A word is a run of anything but ASCII
+   * whitespace, punctuation included. */
+  word(at: I32): Span { _span(_bound(this.handle, _BOUND_WORD, at, "")) };
+
+  /* The line holding AT, with the newline that ends it, if there is one. */
+  line(at: I32): Span { _span(_bound(this.handle, _BOUND_LINE, at, "")) };
+
+  /* The paragraph holding AT. A blank line, "\n\n", ends a paragraph and
+   * belongs to it; text with no blank line is one paragraph. */
+  paragraph(at: I32): Span { _span(_bound(this.handle, _BOUND_PARAGRAPH, at, "")) };
+
+  /* From AT through the next DELIMITER, or to the end when none follows or
+   * DELIMITER is empty. */
+  until(at: I32, delimiter: Bytes): Span {
+    _span(_bound(this.handle, _BOUND_UNTIL, at, delimiter))
+  };
+
+  /* The line holding AT when it starts with PREFIX, as line gives it;
+   * otherwise an empty span at the line's start. */
+  linePrefix(at: I32, prefix: Bytes): Span {
+    _span(_bound(this.handle, _BOUND_LINE_PREFIX, at, prefix))
+  };
+
+  /* Moves the cursor forward to the start of the next word, or the end after
+   * the last word, or back to the start of the word before; where it now is. */
+  seekWord(direction: Direction): I32 { _seek(this.handle, _SEEK_WORD, _step(direction)) };
+
+  /* Moves the cursor forward to the start of the next line, or the end on
+   * the last line, or back to the start of the line before; where it now is. */
+  seekLine(direction: Direction): I32 { _seek(this.handle, _SEEK_LINE, _step(direction)) };
+
+  // Moves the cursor by a paragraph, as seekLine does by a line; where it now is.
+  seekParagraph(direction: Direction): I32 {
+    _seek(this.handle, _SEEK_PARAGRAPH, _step(direction))
+  };
+};

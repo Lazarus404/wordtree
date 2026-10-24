@@ -1,0 +1,8 @@
+{
+  "name": "wordtree",
+  "version": "0.1.0",
+  "description": "Editable UTF-8 text ropes for Jello, on librope",
+  "dev_dependencies": {
+    "degust": {"github": "Lazarus404/degust", "tag": "0.1.0"}
+  }
+}

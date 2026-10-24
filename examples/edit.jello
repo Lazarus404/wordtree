@@ -1,0 +1,11 @@
+// expect: Hello there, world!
+// expect: 19 characters, cursor at 6
+// Builds a line of text by inserting, replacing and appending.
+import { Rope } from wordtree.Rope;
+
+let r = new Rope("Hello world");
+r.insert(5, ",");
+r.replace(0, 5, "Hello there");
+r.append("!");
+r.moveTo(6);
+r.text() + "\n" + `${r.length()} characters, cursor at ${r.cursor()}`

@@ -1,0 +1,211 @@
+package wordtree;
+
+import type { Test } from std.testing;
+import std.testing as T;
+import type { Span } from wordtree.Rope;
+import { Rope, Direction } from wordtree.Rope;
+import { version } from wordtree.Meta;
+
+// The text of the span FIND gives at AT in a rope of TEXT.
+let spanAt = fn(text: Bytes, at: I32, find: (Rope, I32) -> Span): Bytes {
+  let r = new Rope(text);
+  let found = r.spanText(find(r, at));
+  r.close();
+  found
+};
+
+let word = fn(r: Rope, at: I32): Span { r.word(at) };
+let line = fn(r: Rope, at: I32): Span { r.line(at) };
+let paragraph = fn(r: Rope, at: I32): Span { r.paragraph(at) };
+
+let testVersion = fn(t: Test) {
+  T.equal(t, version(), "0.1.0");
+  null
+};
+
+let testEmpty = fn(t: Test) {
+  let r = new Rope();
+  T.equal(t, r.length(), 0);
+  T.equal(t, r.byteLength(), 0);
+  T.equal(t, r.text(), "");
+  null
+};
+
+let testInsert = fn(t: Test) {
+  let r = new Rope("ab");
+  r.insert(1, "Z").insert(4, "cd").insert(2, "");
+  T.equal(t, r.text(), "aZbcd");
+  T.equal(t, r.append("!").text(), "aZbcd!");
+  T.equal(t, r.insert(-5, "<").insert(99, ">").text(), "<aZbcd!>");
+  null
+};
+
+let testDelete = fn(t: Test) {
+  let cases = [(5, 11, "Hello"), (11, 5, "Hello"), (2, 2, "Hello world"), (0, 99, "")];
+  for ((start, end, want) in cases) {
+    T.equal(t, new Rope("Hello world").delete(start, end).text(), want);
+  }
+  null
+};
+
+let testReplace = fn(t: Test) {
+  T.equal(t, new Rope("Hello world").replace(6, 11, "there").text(), "Hello there");
+  T.equal(t, new Rope("Hello world").replace(5, 11, "").text(), "Hello");
+  T.equal(t, new Rope("Hello world").replace(11, 6, "you").text(), "Hello you");
+  null
+};
+
+let testSlice = fn(t: Test) {
+  let r = new Rope("abcdef");
+  T.equal(t, r.slice(2, 5), "cde");
+  T.equal(t, r.slice(1, 1), "");
+  T.equal(t, r.slice(3, 1), "");
+  T.equal(t, r.slice(-3, 99), "abcdef");
+  null
+};
+
+let testUtf8 = fn(t: Test) {
+  let kosmos = "\u{3ba}\u{1f79}\u{3c3}\u{3bc}\u{3b5}";
+  let r = new Rope(kosmos);
+  T.equal(t, r.length(), 5);
+  T.equal(t, r.byteLength(), 11);
+  T.equal(t, r.slice(1, 3), "\u{1f79}\u{3c3}");
+  let emoji = new Rope("\u{1f3b9}");
+  T.equal(t, emoji.length(), 1);
+  T.equal(t, emoji.byteLength(), 4);
+  T.equal(t, new Rope("a\u{e9}b c").word(1), { start: 0, end: 3 });
+  null
+};
+
+let testRefusesBadText = fn(t: Test) {
+  let r = new Rope("ok");
+  T.throws(t, fn() { r.insert(0, "\xff\xfe"); null });
+  T.throws(t, fn() { r.replace(0, 1, "\xff"); null });
+  T.throws(t, fn() { r.insert(0, "a\x00b"); null });
+  T.equal(t, r.text(), "ok");
+  null
+};
+
+let testClear = fn(t: Test) {
+  let r = new Rope("text");
+  r.moveTo(3);
+  r.clear();
+  T.equal(t, r.length(), 0);
+  T.equal(t, r.cursor(), 0);
+  null
+};
+
+let testSeparate = fn(t: Test) {
+  let a = new Rope("aaa");
+  let b = new Rope("bb");
+  T.equal(t, a.text(), "aaa");
+  T.equal(t, b.text(), "bb");
+  null
+};
+
+let testCursor = fn(t: Test) {
+  let r = new Rope("abc");
+  T.equal(t, r.cursor(), 0);
+  T.equal(t, r.moveTo(2), 2);
+  T.equal(t, r.moveTo(99), 3);
+  T.equal(t, r.moveTo(-1), 0);
+  null
+};
+
+let testCursorFollowsEdits = fn(t: Test) {
+  let r = new Rope("0123456789");
+  r.moveTo(8);
+  r.delete(1, 3);
+  T.equal(t, r.cursor(), 6);
+  T.equal(t, r.text(), "03456789");
+  r.moveTo(5);
+  r.delete(4, 7);
+  T.equal(t, r.cursor(), 4);
+  r.moveTo(2);
+  r.insert(0, "xx");
+  T.equal(t, r.cursor(), 2);
+  let s = new Rope("Hello world");
+  s.moveTo(9);
+  s.replace(6, 11, "!");
+  T.equal(t, s.cursor(), 6);
+  null
+};
+
+let testWord = fn(t: Test) {
+  T.equal(t, spanAt("say hello there", 4, word), "hello");
+  T.equal(t, spanAt("one two", 3, word), "two");
+  T.equal(t, spanAt("done ", 4, word), "");
+  T.equal(t, spanAt("wait...what", 6, word), "wait...what");
+  T.equal(t, spanAt("a\tb", 2, word), "b");
+  T.equal(t, spanAt("", 0, word), "");
+  let r = new Rope("done ");
+  T.equal(t, r.word(4), { start: 4, end: 4 });
+  null
+};
+
+let testLine = fn(t: Test) {
+  T.equal(t, spanAt("first\nsecond", 0, line), "first\n");
+  T.equal(t, spanAt("line one\nline two", 10, line), "line two");
+  T.equal(t, spanAt("only line", 4, line), "only line");
+  null
+};
+
+let testParagraph = fn(t: Test) {
+  T.equal(t, spanAt("para one\n\npara two", 12, paragraph), "para two");
+  T.equal(t, spanAt("para one\n\npara two", 3, paragraph), "para one\n\n");
+  T.equal(t, spanAt("line one\nline two", 5, paragraph), "line one\nline two");
+  null
+};
+
+let testUntil = fn(t: Test) {
+  let r = new Rope("abc---def");
+  T.equal(t, r.spanText(r.until(2, "---")), "c---");
+  let s = new Rope("abcdef");
+  T.equal(t, s.until(2, "---"), { start: 2, end: 6 });
+  T.equal(t, s.until(1, ""), { start: 1, end: 6 });
+  null
+};
+
+let testLinePrefix = fn(t: Test) {
+  let r = new Rope("# Title\nBody");
+  T.equal(t, r.spanText(r.linePrefix(2, "#")), "# Title\n");
+  T.equal(t, r.linePrefix(9, "#"), { start: 8, end: 8 });
+  T.equal(t, r.linePrefix(2, ""), { start: 0, end: 0 });
+  null
+};
+
+let testSeekWord = fn(t: Test) {
+  let r = new Rope("one two three");
+  T.equal(t, r.seekWord(Direction.Forward), 4);
+  T.equal(t, r.seekWord(Direction.Forward), 8);
+  T.equal(t, r.seekWord(Direction.Forward), 13);
+  T.equal(t, r.seekWord(Direction.Back), 8);
+  r.moveTo(10);
+  T.equal(t, r.seekWord(Direction.Back), 4);
+  T.equal(t, r.seekWord(Direction.Back), 0);
+  T.equal(t, r.seekWord(Direction.Back), 0);
+  null
+};
+
+let testSeekLine = fn(t: Test) {
+  let r = new Rope("a\nb");
+  T.equal(t, r.seekLine(Direction.Forward), 2);
+  T.equal(t, r.seekLine(Direction.Forward), 3);
+  T.equal(t, r.seekLine(Direction.Back), 0);
+  null
+};
+
+let testSeekParagraph = fn(t: Test) {
+  let r = new Rope("first\n\nsecond");
+  T.equal(t, r.seekParagraph(Direction.Forward), 7);
+  r.moveTo(10);
+  T.equal(t, r.seekParagraph(Direction.Back), 0);
+  null
+};
+
+let testClosed = fn(t: Test) {
+  let r = new Rope("gone");
+  r.close();
+  r.close();
+  null
+};
